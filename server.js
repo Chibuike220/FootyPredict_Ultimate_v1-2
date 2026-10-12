@@ -7,71 +7,132 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_FOOTBALL_KEY;
-const API_URL = "https://v3.football.api-sports.io";
+const API_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
+const API_URL = "https://api.football-data.org/v4";
 
-async function apiFootball(endpoint) {
-  if (!API_KEY) {
-    throw new Error("API_FOOTBALL_KEY is not configured");
+async function footballData(endpoint) {
+  if (!API_TOKEN) {
+    throw new Error("FOOTBALL_DATA_TOKEN is not configured in Render");
   }
 
   const response = await fetch(API_URL + endpoint, {
     headers: {
-      "x-apisports-key": API_KEY
+      "X-Auth-Token": API_TOKEN
     }
   });
 
+  const text = await response.text();
+  let data;
+
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { message: text };
+  }
+
   if (!response.ok) {
-    throw new Error("API-Football request failed");
+    throw new Error(
+      data.message || "Football-data.org request failed: " + response.status
+    );
   }
 
-  const data = await response.json();
+  return data;
+}
 
-  if (data.errors && Object.keys(data.errors).length > 0) {
-    throw new Error(JSON.stringify(data.errors));
-  }
+function convertMatch(match) {
+  const statusMap = {
+    TIMED: "NS",
+    SCHEDULED: "NS",
+    IN_PLAY: "LIVE",
+    LIVE: "LIVE",
+    PAUSED: "HT",
+    FINISHED: "FT",
+    POSTPONED: "PST",
+    SUSPENDED: "SUSP",
+    CANCELLED: "CANC",
+    AWARDED: "AWD"
+  };
 
-  return data.response || [];
+  return {
+    fixture: {
+      id: match.id,
+      date: match.utcDate,
+      timestamp: Math.floor(Date.parse(match.utcDate) / 1000),
+      status: {
+        short: statusMap[match.status] || match.status,
+        long: match.status
+      }
+    },
+    league: {
+      id: match.competition?.id,
+      name: match.competition?.name || "Football",
+      country: match.area?.name || "",
+      logo: match.competition?.emblem || "",
+      round: match.matchday
+        ? "Matchday " + match.matchday
+        : ""
+    },
+    teams: {
+      home: {
+        id: match.homeTeam?.id,
+        name: match.homeTeam?.name || "Home team",
+        logo: match.homeTeam?.crest || "",
+        winner: match.score?.winner === "HOME_TEAM"
+      },
+      away: {
+        id: match.awayTeam?.id,
+        name: match.awayTeam?.name || "Away team",
+        logo: match.awayTeam?.crest || "",
+        winner: match.score?.winner === "AWAY_TEAM"
+      }
+    },
+    goals: {
+      home: match.score?.fullTime?.home ?? null,
+      away: match.score?.fullTime?.away ?? null
+    }
+  };
 }
 
 app.get("/", (req, res) => {
   res.json({
     app: "FootyPredict",
-    status: "online"
+    status: "online",
+    provider: "Football-data.org"
   });
 });
 
 app.get("/api/fixtures", async (req, res) => {
   try {
     const date =
-      req.query.date ||
-      new Date().toISOString().slice(0, 10);
+      req.query.date || new Date().toISOString().slice(0, 10);
 
-    const fixtures = await apiFootball(
-      "/fixtures?date=" + encodeURIComponent(date)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        error: "Use the date format YYYY-MM-DD"
+      });
+    }
+
+    const data = await footballData(
+      "/matches?dateFrom=" +
+        encodeURIComponent(date) +
+        "&dateTo=" +
+        encodeURIComponent(date)
     );
 
-    res.json(fixtures);
+    res.json((data.matches || []).map(convertMatch));
   } catch (error) {
-    res.status(500).json({
+    console.error("Fixtures error:", error.message);
+    res.status(502).json({
       error: error.message
     });
   }
 });
 
-app.get("/api/predictions/:fixture", async (req, res) => {
-  try {
-    const predictions = await apiFootball(
-      "/predictions?fixture=" +
-      encodeURIComponent(req.params.fixture)
-    );
-
-    res.json(predictions);
-  } catch (error) {
-    res.status(500).json({
-      error: error.message
-    });
-  }
+app.get("/api/predictions/:fixture", (req, res) => {
+  res.status(501).json({
+    error:
+      "Automatic predictions are not provided by Football-data.org. A separate prediction system is needed."
+  });
 });
 
 app.listen(PORT, () => {
