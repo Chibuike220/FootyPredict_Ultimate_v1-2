@@ -143,6 +143,31 @@ app.get("/api/predictions/:fixture", async (req, res) => {
       return res.status(404).json({ error: "Match not found" });
     }
 
+    const homeScore = match.score?.fullTime?.home;
+    const awayScore = match.score?.fullTime?.away;
+    const finished = match.status === "FINISHED";
+
+    let home = 40;
+    let draw = 30;
+    let away = 30;
+
+    if (homeScore !== null && homeScore !== undefined &&
+        awayScore !== null && awayScore !== undefined) {
+      if (homeScore > awayScore) {
+        home = 100;
+        draw = 0;
+        away = 0;
+      } else if (homeScore === awayScore) {
+        home = 0;
+        draw = 100;
+        away = 0;
+      } else {
+        home = 0;
+        draw = 0;
+        away = 100;
+      }
+    }
+
     res.json({
       fixture: {
         id: match.id,
@@ -154,21 +179,29 @@ app.get("/api/predictions/:fixture", async (req, res) => {
         away: { name: match.awayTeam.name }
       },
       predictions: {
-        winner: { name: "Undetermined" },
-        advice: "Insufficient statistical data",
+        winner: {
+          name: finished
+            ? homeScore === awayScore
+              ? "Draw"
+              : homeScore > awayScore
+                ? match.homeTeam.name
+                : match.awayTeam.name
+            : "Undetermined"
+        },
+        advice: finished
+          ? "Result based on the final score"
+          : "Pre-match prediction model not yet available",
         percent: {
-          home: "N/A",
-          draw: "N/A",
-          away: "N/A"
+          home: finished ? `${home}%` : "N/A",
+          draw: finished ? `${draw}%` : "N/A",
+          away: finished ? `${away}%` : "N/A"
         }
       }
     });
   } catch (error) {
     console.error("Predictions error:", error.message);
-    res.status(502).json({ error: "Unable to load match information" });
+    res.status(502).json({
+      error: "Unable to load match information"
+    });
   }
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("FootyPredict server running on port " + PORT);
 });
