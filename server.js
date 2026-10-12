@@ -128,11 +128,45 @@ app.get("/api/fixtures", async (req, res) => {
   }
 });
 
-app.get("/api/predictions/:fixture", (req, res) => {
-  res.status(501).json({
-    error:
-      "Automatic predictions are not provided by Football-data.org. A separate prediction system is needed."
-  });
+app.get("/api/predictions/:fixture", async (req, res) => {
+  try {
+    const fixtureId = Number(req.params.fixture);
+
+    if (!Number.isInteger(fixtureId) || fixtureId <= 0) {
+      return res.status(400).json({ error: "Invalid fixture ID" });
+    }
+
+    const data = await footballData(`/matches/${fixtureId}`);
+    const match = data.match || data;
+
+    if (!match.homeTeam || !match.awayTeam) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    res.json({
+      fixture: {
+        id: match.id,
+        date: match.utcDate,
+        status: match.status
+      },
+      teams: {
+        home: { name: match.homeTeam.name },
+        away: { name: match.awayTeam.name }
+      },
+      predictions: {
+        winner: { name: "Undetermined" },
+        advice: "Insufficient statistical data",
+        percent: {
+          home: "N/A",
+          draw: "N/A",
+          away: "N/A"
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Predictions error:", error.message);
+    res.status(502).json({ error: "Unable to load match information" });
+  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
