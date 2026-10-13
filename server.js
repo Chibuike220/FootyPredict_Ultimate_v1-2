@@ -9,35 +9,67 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const API_TOKEN = process.env.FOOTBALL_DATA_TOKEN;
 const API_URL = "https://api.football-data.org/v4";
+const apiCache = new Map();
+const pendingRequests = new Map();
 
 async function footballData(endpoint) {
   if (!API_TOKEN) {
     throw new Error("FOOTBALL_DATA_TOKEN is not configured in Render");
   }
 
-  const response = await fetch(API_URL + endpoint, {
-    headers: {
-      "X-Auth-Token": API_TOKEN
-    }
-  });
+  const cacheKey = endpoint;
+  const cached = apiCache.get(cacheKey);
 
-  const text = await response.text();
-  let data;
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  if (pendingRequests.has(cacheKey)) {
+    return pendingRequests.get(cacheKey);
+  }
+
+  const request = (async () => {
+    const response = await fetch(API_URL + endpoint, {
+      headers: {
+        "X-Auth-Token": API_TOKEN
+      }
+    });
+
+    const text = await response.text();
+    let data;
+
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        data.message || "Football-data.org request failed: " + response.status
+      );
+    }
+
+    const cacheDuration = endpoint.startsWith("/matches?")
+      ? 10 * 60 * 1000
+      : 30 * 60 * 1000;
+
+    apiCache.set(cacheKey, {
+      data,
+      expiresAt: Date.now() + cacheDuration
+    });
+
+    return data;
+  })();
+
+  pendingRequests.set(cacheKey, request);
 
   try {
-    data = JSON.parse(text);
-  } catch {
-    data = { message: text };
+    return await request;
+  } finally {
+    pendingRequests.delete(cacheKey);
   }
-
-  if (!response.ok) {
-    throw new Error(
-      data.message || "Football-data.org request failed: " + response.status
-    );
-  }
-
-  return data;
-}
+}  
 
 function convertMatch(match) {
   const statusMap = {
