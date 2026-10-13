@@ -103,8 +103,7 @@ app.get("/", (req, res) => {
 
 app.get("/api/fixtures", async (req, res) => {
   try {
-    const date =
-      req.query.date || new Date().toISOString().slice(0, 10);
+    const date = req.query.date || new Date().toISOString().slice(0, 10);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return res.status(400).json({
@@ -112,11 +111,18 @@ app.get("/api/fixtures", async (req, res) => {
       });
     }
 
+    const startDate = new Date(date + "T00:00:00Z");
+    const endDate = new Date(startDate);
+    endDate.setUTCDate(endDate.getUTCDate() + 7);
+
+    const dateFrom = startDate.toISOString().slice(0, 10);
+    const dateTo = endDate.toISOString().slice(0, 10);
+
     const data = await footballData(
       "/matches?dateFrom=" +
-        encodeURIComponent(date) +
-        "&dateTo=" +
-        encodeURIComponent(date)
+      encodeURIComponent(dateFrom) +
+      "&dateTo=" +
+      encodeURIComponent(dateTo)
     );
 
     res.json((data.matches || []).map(convertMatch));
@@ -127,7 +133,6 @@ app.get("/api/fixtures", async (req, res) => {
     });
   }
 });
-
 app.get("/api/predictions/:fixture", async (req, res) => {
   try {
     const fixtureId = Number(req.params.fixture);
