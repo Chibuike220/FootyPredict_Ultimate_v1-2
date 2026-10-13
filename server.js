@@ -156,22 +156,29 @@ app.get("/api/predictions/:fixture", async (req, res) => {
     let draw = 30;
     let away = 30;
 
-    if (homeScore !== null && homeScore !== undefined &&
-        awayScore !== null && awayScore !== undefined) {
-      if (homeScore > awayScore) {
-        home = 100;
-        draw = 0;
-        away = 0;
-      } else if (homeScore === awayScore) {
-        home = 0;
-        draw = 100;
-        away = 0;
-      } else {
-        home = 0;
-        draw = 0;
-        away = 100;
-      }
-    }
+if (
+  finished &&
+  homeScore != null &&
+  awayScore != null
+) {
+  if (homeScore > awayScore) {
+    home = 100;
+    draw = 0;
+    away = 0;
+  } else if (homeScore < awayScore) {
+    home = 0;
+    draw = 0;
+    away = 100;
+  } else {
+    home = 0;
+    draw = 100;
+    away = 0;
+  }
+} else {
+  home = 40;
+  draw = 30;
+  away = 30;
+}
 
     res.json({
       fixture: {
@@ -197,10 +204,10 @@ app.get("/api/predictions/:fixture", async (req, res) => {
           ? "Result based on the final score"
           : "Pre-match prediction model not yet available",
         percent: {
-          home: finished ? `${home}%` : "N/A",
-          draw: finished ? `${draw}%` : "N/A",
-          away: finished ? `${away}%` : "N/A"
-        }
+  home: `${home}%`,
+  draw: `${draw}%`,
+  away: `${away}%`
+       }
       }
     });
   } catch (error) {
