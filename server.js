@@ -205,3 +205,6 @@ app.get("/api/predictions/:fixture", async (req, res) => {
     });
   }
 });
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("FootyPredict server running on port " + PORT);
+});
