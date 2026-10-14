@@ -184,32 +184,157 @@ app.get("/api/predictions/:fixture", async (req, res) => {
     const awayScore = match.score?.fullTime?.away;
     const finished = match.status === "FINISHED";
 
-    let home = 40;
-    let draw = 30;
-    let away = 30;
+    let home = 0;
+let draw = 0;
+let away = 0;
 
-if (
-  finished &&
-  homeScore != null &&
-  awayScore != null
-) {
-  if (homeScore > awayScore) {
-    home = 100;
-    draw = 0;
-    away = 0;
-  } else if (homeScore < awayScore) {
-    home = 0;
-    draw = 0;
-    away = 100;
-  } else {
-    home = 0;
-    draw = 100;
-    away = 0;
+let predictionWinner = "Prediction unavailable";
+let predictionAvailable = false;
+
+if (!finished) {
+  try {
+    async function getTeamStrength(teamId) {
+      const result = await footballData(
+        `/teams/${teamId}/matches?status=FINISHED&limit=10`
+      );
+
+      if (!result || !Array.isArray(result.matches)) {
+        return null;
+      }
+
+      const games = result.matches
+        .filter(game =>
+          game.status === "FINISHED" &&
+          game.score?.fullTime?.home != null &&
+          game.score?.fullTime?.away != null &&
+          (
+            game.homeTeam.id === teamId ||
+            game.awayTeam.id === teamId
+          )
+        )
+        .sort(
+          (a, b) =>
+            new Date(b.utcDate) - new Date(a.utcDate)
+        )
+        .slice(0, 10);
+
+      if (games.length < 5) {
+        return null;
+      }
+
+      let goalsScored = 0;
+      let goalsConceded = 0;
+      let points = 0;
+
+      for (const game of games) {
+        const isHome = game.homeTeam.id === teamId;
+
+        const scored = isHome
+          ? game.score.fullTime.home
+          : game.score.fullTime.away;
+
+        const conceded = isHome
+          ? game.score.fullTime.away
+          : game.score.fullTime.home;
+
+        goalsScored += scored;
+        goalsConceded += conceded;
+
+        if (scored > conceded) {
+          points += 3;
+        } else if (scored === conceded) {
+          points += 1;
+        }
+      }
+
+      return {
+        attack: goalsScored / games.length,
+        defence: goalsConceded / games.length,
+        pointsPerGame: points / games.length
+      };
+    }
+
+    const [homeStats, awayStats] = await Promise.all([
+      getTeamStrength(match.homeTeam.id),
+      getTeamStrength(match.awayTeam.id)
+    ]);
+
+    if (homeStats && awayStats) {
+      const expectedHome = Math.max(
+        0.15,
+        (homeStats.attack + awayStats.defence) / 2 + 0.20
+      );
+
+      const expectedAway = Math.max(
+        0.15,
+        (awayStats.attack + homeStats.defence) / 2
+      );
+
+      function poisson(goals, expected) {
+        let probability = Math.exp(-expected);
+
+        for (let i = 1; i <= goals; i++) {
+          probability *= expected / i;
+        }
+
+        return probability;
+      }
+
+      let pHome = 0;
+      let pDraw = 0;
+      let pAway = 0;
+
+      for (let h = 0; h <= 10; h++) {
+        for (let a = 0; a <= 10; a++) {
+          const probability =
+            poisson(h, expectedHome) *
+            poisson(a, expectedAway);
+
+          if (h > a) {
+            pHome += probability;
+          } else if (h === a) {
+            pDraw += probability;
+          } else {
+            pAway += probability;
+          }
+        }
+      }
+
+      const total = pHome + pDraw + pAway;
+
+      if (total > 0 && Number.isFinite(total)) {
+        home = Math.round((pHome / total) * 100);
+        draw = Math.round((pDraw / total) * 100);
+        away = 100 - home - draw;
+
+        predictionWinner =
+          home >= draw && home >= away
+            ? match.homeTeam.name
+            : draw >= home && draw >= away
+              ? "Draw"
+              : match.awayTeam.name;
+
+        predictionAvailable = true;
+      }
+    }
+  } catch (error) {
+    console.error(
+      "Prediction calculation failed:",
+      error.message
+    );
   }
-} else {
-  home = 40;
-  draw = 30;
-  away = 30;
+} else if (homeScore != null && awayScore != null) {
+  // For a completed match, show the actual result.
+  // This is NOT a prediction.
+  if (homeScore > awayScore) {
+    predictionWinner = match.homeTeam.name;
+  } else if (awayScore > homeScore) {
+    predictionWinner = match.awayTeam.name;
+  } else {
+    predictionWinner = "Draw";
+  }
+
+  predictionAvailable = true;
 }
 
     res.json({
@@ -224,18 +349,13 @@ if (
       },
       predictions: {
         winner: {
-          name: finished
-            ? homeScore === awayScore
-              ? "Draw"
-              : homeScore > awayScore
-                ? match.homeTeam.name
-                : match.awayTeam.name
-            : "Undetermined"
-        },
+  name: predictionWinner
+},
         advice: finished
-          ? "Result based on the final score"
-          : "Pre-match prediction model not yet available",
-        percent: {
+  ? "Result based on the final score"
+  : predictionAvailable
+    ? "Statistical prediction based on recent team performance"
+    : "Prediction unavailable: insufficient match data",percent: {
   home: `${home}%`,
   draw: `${draw}%`,
   away: `${away}%`
